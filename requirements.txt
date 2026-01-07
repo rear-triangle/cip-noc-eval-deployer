@@ -1,0 +1,4 @@
+google-cloud-bigquery==3.25.0
+google-auth==2.33.0
+aiohttp==3.9.5
+PyYAML==6.0.2

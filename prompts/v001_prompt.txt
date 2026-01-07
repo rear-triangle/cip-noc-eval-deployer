@@ -1,0 +1,30 @@
+You are evaluating whether a CIP code is a valid educational pathway for a NOC code in Canada.
+
+Return ONLY valid JSON matching this schema:
+{
+  "label": "YES|NO|UNSURE_LEAN_YES|UNSURE_LEAN_NO",
+  "confidence": 0.0-1.0,
+  "rationale": "short explanation",
+  "model_version": "string",
+  "prompt_version": "{{prompt_version}}"
+}
+
+CIP:
+- code: {{cip_code}}
+- level: {{cip_level}}
+- title: {{cip_title}}
+- definition: {{cip_definition}}
+- exclusions: {{cip_exclusions}}
+- examples: {{cip_examples}}
+
+NOC:
+- code: {{noc_code}}
+- level: {{noc_level}}
+- title: {{noc_title}}
+- definition: {{noc_definition}}
+- main duties: {{noc_main_duties}}
+- employment requirements: {{noc_employment_requirements}}
+- exclusions: {{noc_exclusions}}
+
+Question:
+Is this CIP a valid educational pathway for this NOC? Be strict: answer YES only if the CIP would reasonably prepare someone for the work described by the NOC duties and requirements.

@@ -1,0 +1,26 @@
+project_id: lmic-dev-datahub
+location: us-east4
+
+datasets:
+  canonical: llm_cip_noc_canonical
+  ops: llm_cip_noc_ops
+
+tables:
+  pairs: cip_noc_pairs
+  cip_canonical: cip_canonical
+  noc_canonical: noc_canonical
+  run_registry: run_registry
+  results: results
+
+llm:
+  base_url: "https://ollama-gcs-llama3-gpu-228291553312.us-east4.run.app"
+  model: "llama3"
+  timeout_s: 300
+  max_retries: 4
+  concurrency: 16
+  batch_size: 50
+  impersonate_service_account: "228291553312-compute@developer.gserviceaccount.com"
+
+run_defaults:
+  n_shards: 10
+  prompt_profile: "balanced"
