@@ -16,5 +16,4 @@ COPY src/ ./src/
 COPY configs/ ./configs/
 COPY prompts/ ./prompts/
 
-ENTRYPOINT ["python", "-m"]
-CMD ["src.worker", "--help"]
+ENTRYPOINT ["python", "-m", "src.worker"]

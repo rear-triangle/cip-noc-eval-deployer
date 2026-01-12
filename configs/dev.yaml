@@ -14,13 +14,24 @@ tables:
 
 llm:
   base_url: "https://ollama-gcs-llama3-gpu-228291553312.us-east4.run.app"
-  model: "llama3"
+
+  # NEW: explicit auth mode (default is oidc)
+  # - "oidc": send Authorization: Bearer <ID_TOKEN>
+  # - "none": if the Cloud Run service is public (no auth)
+  auth_mode: "oidc"
+
+  # Ollama settings
+  model: "llama3:8b"
   timeout_s: 300
   max_retries: 4
+
+  # Worker runtime settings
   concurrency: 16
   batch_size: 50
-  impersonate_service_account: "228291553312-compute@developer.gserviceaccount.com"
+
+  # Local token minting via impersonation (optional)
+  impersonate_service_account: null
 
 run_defaults:
-  n_shards: 10
+  n_shards: 50
   prompt_profile: "balanced"

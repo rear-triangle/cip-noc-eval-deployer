@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -19,18 +19,9 @@ from src.prompt_loader import load_prompt, render_prompt
 from src.result_writer import ResultWriter, ResultsTarget
 
 
-def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--prompt-path", required=True)
-    p.add_argument("--prompt-version", required=True)
-    p.add_argument("--cip-levels", required=True, help="comma-separated, e.g. 3 or 1,2,3")
-    p.add_argument("--noc-levels", required=True, help="comma-separated, e.g. 5 or 4,5")
-    p.add_argument("--n-shards", type=int, required=True)
-    p.add_argument("--shard-index", type=int, required=True)
-    p.add_argument("--max-pairs", type=int, default=0, help="0 means no cap")
-    return p.parse_args()
+def _env(name: str, default: Optional[str] = None) -> Optional[str]:
+    v = os.getenv(name)
+    return v if v is not None and v != "" else default
 
 
 def _csv_ints(s: str) -> List[int]:
@@ -41,66 +32,118 @@ def _safe_get(obj: Dict[str, Any], key: str, default=None):
     return obj.get(key, default)
 
 
-def _now_rfc3339() -> str:
-    # BigQuery accepts RFC3339 strings for TIMESTAMP fields when using insert_rows_json
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-def _get_llm_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _build_parser() -> argparse.ArgumentParser:
     """
-    Compatibility shim:
-    - Your current configs/dev.yaml has llm.endpoint_url
-    - The Ollama-correct setup uses llm.base_url + llm.generate_path + llm.model
+    Support BOTH CLI flags and env-var fallbacks.
 
-    We'll support both so you can iterate without re-editing everything at once.
+    Env vars supported:
+      CONFIG_PATH
+      RUN_ID
+      PROMPT_PATH
+      PROMPT_VERSION
+      CIP_LEVELS
+      NOC_LEVELS
+      MAX_PAIRS
     """
-    llm_cfg = dict(cfg.get("llm", {}))
+    p = argparse.ArgumentParser()
 
-    # If user hasn't updated config yet, fall back to endpoint_url as base_url.
-    if "base_url" not in llm_cfg and "endpoint_url" in llm_cfg:
-        llm_cfg["base_url"] = llm_cfg["endpoint_url"]
+    p.add_argument("--config", default=_env("CONFIG_PATH"))
+    p.add_argument("--run-id", default=_env("RUN_ID"))
 
-    # Defaults for Ollama
-    llm_cfg.setdefault("generate_path", "/api/generate")
+    p.add_argument("--prompt-path", default=_env("PROMPT_PATH"))
+    p.add_argument("--prompt-version", default=_env("PROMPT_VERSION"))
 
-    # Model must be set eventually; defaulting is risky, but better than crashing immediately.
-    llm_cfg.setdefault("model", "llama3")
+    p.add_argument("--cip-levels", default=_env("CIP_LEVELS"), help="comma-separated, e.g. 3 or 1,2,3")
+    p.add_argument("--noc-levels", default=_env("NOC_LEVELS"), help="comma-separated, e.g. 5 or 4,5")
 
-    # Reasonable defaults
-    llm_cfg.setdefault("timeout_s", 300)
-    llm_cfg.setdefault("max_retries", 4)
-    llm_cfg.setdefault("concurrency", 2)
-    llm_cfg.setdefault("insert_batch_size", 50)
+    # Cloud Run Jobs sets these automatically per task
+    p.add_argument(
+        "--n-shards",
+        type=int,
+        default=int(os.getenv("CLOUD_RUN_TASK_COUNT", "1")),
+        help="defaults to CLOUD_RUN_TASK_COUNT if set",
+    )
+    p.add_argument(
+        "--shard-index",
+        type=int,
+        default=int(os.getenv("CLOUD_RUN_TASK_INDEX", "0")),
+        help="defaults to CLOUD_RUN_TASK_INDEX if set",
+    )
 
-    return llm_cfg
+    p.add_argument("--max-pairs", type=int, default=int(_env("MAX_PAIRS", "0") or "0"), help="0 means no cap")
+    return p
+
+
+def _validate_args(args: argparse.Namespace) -> List[str]:
+    missing = []
+    if not args.config:
+        missing.append("--config / CONFIG_PATH")
+    if not args.run_id:
+        missing.append("--run-id / RUN_ID")
+    if not args.prompt_path:
+        missing.append("--prompt-path / PROMPT_PATH")
+    if not args.prompt_version:
+        missing.append("--prompt-version / PROMPT_VERSION")
+    if not args.cip_levels:
+        missing.append("--cip-levels / CIP_LEVELS")
+    if not args.noc_levels:
+        missing.append("--noc-levels / NOC_LEVELS")
+    return missing
 
 
 async def main() -> None:
-    args = _parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+    missing = _validate_args(args)
+
+    # ALWAYS log something early (even if we will exit).
+    print(
+        json.dumps(
+            {
+                "msg": "worker starting",
+                "run_id": args.run_id,
+                "config": args.config,
+                "prompt_path": args.prompt_path,
+                "prompt_version": args.prompt_version,
+                "cip_levels": args.cip_levels,
+                "noc_levels": args.noc_levels,
+                "n_shards": args.n_shards,
+                "shard_index": args.shard_index,
+                "max_pairs": args.max_pairs,
+                "task_index_env": os.getenv("CLOUD_RUN_TASK_INDEX"),
+                "task_count_env": os.getenv("CLOUD_RUN_TASK_COUNT"),
+                "missing_inputs": missing,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    if missing:
+        raise SystemExit(
+            "Missing required inputs: "
+            + ", ".join(missing)
+            + "\nProvide CLI flags or the corresponding env vars."
+        )
+
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
 
     project_id = cfg["project_id"]
-    location = cfg["location"]
     canonical_ds = cfg["datasets"]["canonical"]
     ops_ds = cfg["datasets"]["ops"]
-    pairs_ds = cfg["datasets"].get("pairs", ops_ds)
-
     tables = cfg["tables"]
-    llm_cfg = _get_llm_cfg(cfg)
+    llm_cfg = cfg["llm"]
 
     cip_levels = _csv_ints(args.cip_levels)
     noc_levels = _csv_ints(args.noc_levels)
-    max_pairs: Optional[int] = None if args.max_pairs == 0 else args.max_pairs
+    max_pairs = None if args.max_pairs == 0 else args.max_pairs
 
-    bq = bigquery.Client(project=project_id, location=location)
+    bq = bigquery.Client(project=project_id, location=cfg["location"])
 
     refs = DatasetRefs(
         project_id=project_id,
         canonical_dataset=canonical_ds,
         ops_dataset=ops_ds,
-        pairs_dataset=pairs_ds,
     )
-
     tref = TableRefs(
         pairs=tables["pairs"],
         cip_canonical=tables["cip_canonical"],
@@ -131,26 +174,30 @@ async def main() -> None:
 
     rows = list(bq.query(query_sql, job_config=job_config).result())
     if not rows:
-        print("No work found for this shard (already complete, empty slice, or capped).")
+        print(f"No work found for shard {args.shard_index}/{args.n_shards}.")
         return
 
-    llm = LLMClient(LLMClientConfig(
-        base_url=llm_cfg["base_url"],
-        generate_path=llm_cfg.get("generate_path", "/api/generate"),
-        model=llm_cfg.get("model", "llama3"),
-        timeout_s=int(llm_cfg.get("timeout_s", 300)),
-        max_retries=int(llm_cfg.get("max_retries", 4)),
-        impersonate_service_account=llm_cfg.get("impersonate_service_account"),
-    ))
+    llm = LLMClient(
+        LLMClientConfig(
+            base_url=llm_cfg["base_url"],
+            generate_path=llm_cfg.get("generate_path", "/api/generate"),
+            model=llm_cfg.get("model", "llama3"),
+            timeout_s=int(llm_cfg.get("timeout_s", 300)),
+            max_retries=int(llm_cfg.get("max_retries", 4)),
+            auth_mode=str(llm_cfg.get("auth_mode", "oidc")),
+            impersonate_service_account=llm_cfg.get("impersonate_service_account"),
+        )
+    )
 
     writer = ResultWriter(
         bq=bq,
         target=ResultsTarget(project_id=project_id, dataset=ops_ds, table=tables["results"]),
     )
 
-    sem = asyncio.Semaphore(int(llm_cfg.get("concurrency", 2)))
+    sem = asyncio.Semaphore(int(llm_cfg.get("concurrency", 16)))
 
     async with aiohttp.ClientSession() as session:
+
         async def process_row(r) -> Dict[str, Any]:
             fields = {
                 "cip_code": r["cip_code"],
@@ -175,7 +222,6 @@ async def main() -> None:
                 resp = await llm.infer_json(session, prompt_text)
                 latency_ms = int((time.time() - t0) * 1000)
 
-            # Extract structured outputs (fallback-safe)
             label = _safe_get(resp, "label", None)
             confidence = _safe_get(resp, "confidence", None)
             rationale = _safe_get(resp, "rationale", None)
@@ -197,18 +243,16 @@ async def main() -> None:
                 "rationale": rationale,
                 "model_version": model_version,
                 "response_json": json.dumps(resp, ensure_ascii=False),
-                "semantic_cosine_similarity": None,  # fill later when embeddings exist
-                "created_at": _now_rfc3339(),
+                "semantic_cosine_similarity": None,
+                "created_at": None,
                 "latency_ms": latency_ms,
             }
 
-        # Process rows concurrently
         results: List[Dict[str, Any]] = await asyncio.gather(*(process_row(r) for r in rows))
 
-    # Insert in batches
-    batch_size = int(llm_cfg.get("insert_batch_size", 50))
+    batch_size = int(llm_cfg.get("batch_size", 50))
     for i in range(0, len(results), batch_size):
-        writer.insert_rows(results[i:i + batch_size])
+        writer.insert_rows(results[i : i + batch_size])
 
     print(f"Inserted {len(results)} results for shard {args.shard_index}/{args.n_shards}.")
 

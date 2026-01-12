@@ -1,0 +1,40 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: cip-noc-worker
+  namespace: "228291553312"
+spec:
+  template:
+    spec:
+      taskCount: 10
+      parallelism: 10
+      template:
+        spec:
+          serviceAccountName: dbt-runner@lmic-dev-datahub.iam.gserviceaccount.com
+          timeoutSeconds: "3600"
+          maxRetries: 1
+          containers:
+          - image: us-east4-docker.pkg.dev/lmic-dev-datahub/cip-noc-eval/cip-noc-eval:v0.4
+            resources:
+              limits:
+                cpu: "2"
+                memory: 2Gi
+            env:
+            - name: GOOGLE_CLOUD_PROJECT
+              value: lmic-dev-datahub
+
+            # Worker runtime (static)
+            - name: CONFIG_PATH
+              value: configs/dev.yaml
+            - name: PROMPT_PATH
+              value: prompts/v001_prompt.txt
+            - name: PROMPT_VERSION
+              value: v001
+            - name: CIP_LEVELS
+              value: "3"
+            - name: NOC_LEVELS
+              value: "5"
+            - name: MAX_PAIRS
+              value: "1000"
+
+            # RUN_ID is injected per execution via --update-env-vars

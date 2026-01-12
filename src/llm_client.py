@@ -4,33 +4,33 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import aiohttp
-
-import google.auth
-from google.auth.transport.requests import Request, AuthorizedSession
+from google.auth.transport.requests import Request
 from google.oauth2 import id_token
-from google.auth import impersonated_credentials
 
 
 @dataclass(frozen=True)
 class LLMClientConfig:
-    # Cloud Run service base URL (NO PATH), e.g. https://ollama-gcs-llama3-gpu-xxxx.us-east4.run.app
-    base_url: str
-
-    # Ollama API endpoint path
+    base_url: str                 # e.g. https://service.run.app
     generate_path: str = "/api/generate"
-
-    # Ollama model name
     model: str = "llama3"
-
     timeout_s: int = 300
     max_retries: int = 4
 
-    # For local dev: service account email to impersonate and mint an ID token
-    # Example: "228291553312-compute@developer.gserviceaccount.com"
+    # Auth mode:
+    # - "oidc" (default): send Authorization: Bearer <ID_TOKEN>
+    # - "none": do not send auth header (only works if your Cloud Run service is public)
+    auth_mode: str = "oidc"
+
+    # Optional local-dev helper:
+    # If set, we can mint an ID token via gcloud impersonation:
+    #   gcloud auth print-identity-token --impersonate-service-account=... --audiences=...
     impersonate_service_account: Optional[str] = None
 
 
@@ -39,73 +39,79 @@ class LLMClient:
         self.cfg = cfg
         self._audience = cfg.base_url.rstrip("/")
 
-    def _get_oidc_token(self) -> str:
+    def _get_oidc_token(self) -> Optional[str]:
         """
-        Mint an ID token suitable for invoking a Cloud Run service.
+        Token order (most reliable first):
 
-        1) On Cloud Run: uses metadata server via id_token.fetch_id_token(...)
-        2) Locally (ADC): impersonates a service account and calls IAMCredentials generateIdToken
+        1) MANUAL_ID_TOKEN env var (explicit override; matches your old working codebase)
+        2) In GCP (Cloud Run/Compute): id_token.fetch_id_token() uses metadata server
+        3) Local fallback via gcloud impersonation (if configured + gcloud exists)
+
+        Note: User ADC credentials (application_default_credentials.json) typically cannot mint
+        audience-bound ID tokens. That's why BigQuery works but fetch_id_token fails locally.
         """
+        manual = os.getenv("MANUAL_ID_TOKEN")
+        if manual:
+            return manual.strip()
+
         req = Request()
 
-        # 1) Cloud Run / GCE metadata server path
+        # Works in GCP environments (metadata server present)
         try:
             return id_token.fetch_id_token(req, self._audience)
         except Exception:
             pass
 
-        # 2) Local dev path
-        sa = self.cfg.impersonate_service_account
-        if not sa:
-            raise RuntimeError(
-                "Could not mint ID token from default credentials. "
-                "For local runs, set llm.impersonate_service_account in configs/dev.yaml "
-                "and grant your user 'Service Account Token Creator' on that SA."
-            )
+        # Local fallback via gcloud impersonation (only if configured and gcloud exists)
+        if self.cfg.impersonate_service_account and shutil.which("gcloud"):
+            cmd = [
+                "gcloud",
+                "auth",
+                "print-identity-token",
+                f"--impersonate-service-account={self.cfg.impersonate_service_account}",
+                f"--audiences={self._audience}",
+            ]
+            try:
+                out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(
+                    "Failed to mint ID token via gcloud.\n"
+                    f"Command: {' '.join(cmd)}\n"
+                    f"Output:\n{e.output}"
+                ) from e
 
-        # Source creds: your local ADC (user creds) mounted into Docker
-        source_creds, _ = google.auth.default(
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            if not out:
+                raise RuntimeError("gcloud returned an empty identity token.")
+            return out
+
+        # If we got here, we don't have a way to mint a token in this environment
+        raise RuntimeError(
+            "Could not mint an OIDC ID token for Cloud Run.\n\n"
+            "This commonly happens locally because ADC user credentials "
+            "(application_default_credentials.json) can access BigQuery but cannot mint "
+            "audience-bound ID tokens.\n\n"
+            "Fix options:\n"
+            "  A) (Recommended for local smoke tests) Export MANUAL_ID_TOKEN from your host:\n"
+            "     MANUAL_ID_TOKEN=$(gcloud auth print-identity-token --audiences=\"{aud}\")\n"
+            "     and pass -e MANUAL_ID_TOKEN into docker.\n\n"
+            "  B) Set llm.impersonate_service_account in configs/dev.yaml and ensure gcloud exists in the container.\n"
+            "  C) Make the LLM Cloud Run service public and set llm.auth_mode: \"none\".\n"
+            .format(aud=self._audience)
         )
-
-        # Impersonate SA to get an *access token* that can call IAMCredentials APIs
-        imp_creds = impersonated_credentials.Credentials(
-            source_credentials=source_creds,
-            target_principal=sa,
-            target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            lifetime=3600,
-        )
-
-        authed = AuthorizedSession(imp_creds)
-
-        # Call IAMCredentials generateIdToken
-        url = f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{sa}:generateIdToken"
-        body = {"audience": self._audience, "includeEmail": True}
-
-        resp = authed.post(url, json=body, timeout=30)
-
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"IAMCredentials generateIdToken failed: HTTP {resp.status_code}: {resp.text[:1000]}"
-            )
-
-        payload = resp.json()
-        token = payload.get("token")
-        if not token:
-            raise RuntimeError(f"generateIdToken response missing 'token': {payload}")
-
-        return token
 
     async def infer_json(self, session: aiohttp.ClientSession, prompt_text: str) -> Dict[str, Any]:
-        """
-        Calls Ollama /api/generate (non-streaming).
-        Expects Ollama JSON; then parses the model's `response` field as JSON (per your prompt contract).
-        """
         url = self.cfg.base_url.rstrip("/") + self.cfg.generate_path
-        token = self._get_oidc_token()
 
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        payload = {"model": self.cfg.model, "prompt": prompt_text, "stream": False}
+        headers = {"Content-Type": "application/json"}
+        if self.cfg.auth_mode.lower() != "none":
+            token = self._get_oidc_token()
+            headers["Authorization"] = f"Bearer {token}"
+
+        payload = {
+            "model": self.cfg.model,
+            "prompt": prompt_text,
+            "stream": False,
+        }
 
         last_err: Optional[Exception] = None
         timeout = aiohttp.ClientTimeout(total=self.cfg.timeout_s)
@@ -119,7 +125,7 @@ class LLMClient:
 
                     raw_text = (data.get("response") or "").strip()
 
-                    # Your prompt demands JSON-only
+                    # Your prompt asks for JSON only, so parse it
                     try:
                         return json.loads(raw_text)
                     except json.JSONDecodeError:

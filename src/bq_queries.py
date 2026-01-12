@@ -10,7 +10,6 @@ class DatasetRefs:
     project_id: str
     canonical_dataset: str
     ops_dataset: str
-    pairs_dataset: str
 
 
 @dataclass(frozen=True)
@@ -22,7 +21,7 @@ class TableRefs:
 
 
 def _sql_array_int(values: List[int]) -> str:
-    # safe because values are ints from CLI parsing
+    # Safe because values are ints from CLI parsing
     return "[" + ", ".join(str(int(v)) for v in values) + "]"
 
 
@@ -41,11 +40,9 @@ def build_inputs_query(
     Returns a StandardSQL query that yields the input rows for a given shard.
 
     Assumptions:
-    - canonical CIP/NOC tables have one row per code per level and contain the
-      aggregated text fields used in prompting.
-    - pairs table contains ALL candidate pairs with pair_id and both codes
-      and levels.
-    - results table contains run_id + pair_id so we can skip already-done work.
+    - CIP/NOC canonical tables live in refs.canonical_dataset
+    - pairs + results live in refs.ops_dataset (your current setup)
+    - results table contains run_id + pair_id so we can skip already-done work
 
     Output columns match what worker.py expects.
     """
@@ -57,7 +54,8 @@ def build_inputs_query(
     canon = refs.canonical_dataset
     ops = refs.ops_dataset
 
-    pairs_tbl = f"`{project}.{refs.pairs_dataset}.{tables.pairs}`"
+    # IMPORTANT: pairs are in OPS dataset in your setup
+    pairs_tbl = f"`{project}.{ops}.{tables.pairs}`"
     cip_tbl = f"`{project}.{canon}.{tables.cip_canonical}`"
     noc_tbl = f"`{project}.{canon}.{tables.noc_canonical}`"
     results_tbl = f"`{project}.{ops}.{tables.results}`"
@@ -65,14 +63,6 @@ def build_inputs_query(
     limit_clause = ""
     if max_pairs is not None and int(max_pairs) > 0:
         limit_clause = f"\nLIMIT {int(max_pairs)}"
-
-    # Key ideas:
-    # 1) Filter pairs by requested levels
-    # 2) Exclude already-completed pairs for this run_id
-    # 3) Apply global LIMIT (if any) deterministically (ORDER BY pair_id)
-    # 4) Shard AFTER limiting so max_pairs means "total for the run slice"
-    # 5) Join onto CIP/NOC canonical for rich fields
-    # 6) Create input_payload_hash to guarantee reproducibility/debugging
 
     sql = f"""
 WITH
@@ -83,7 +73,10 @@ WITH
       p.cip_level,
       p.noc_code,
       p.noc_level,
-      CONCAT(CAST(p.cip_level AS STRING), ':', p.cip_code, '|', CAST(p.noc_level AS STRING), ':', p.noc_code) AS pair_key
+      CONCAT(
+        CAST(p.cip_level AS STRING), ':', p.cip_code, '|',
+        CAST(p.noc_level AS STRING), ':', p.noc_code
+      ) AS pair_key
     FROM {pairs_tbl} p
     WHERE p.cip_level IN UNNEST({cip_levels_sql})
       AND p.noc_level IN UNNEST({noc_levels_sql})
@@ -127,7 +120,6 @@ WITH
       n.noc_employment_requirements,
       n.noc_exclusions,
 
-      -- Hash is based on *exact* content fed to the prompt (stable debugging).
       TO_HEX(SHA256(CONCAT(
         'prompt_version=', @prompt_version, '\\n',
         'cip_code=', s.cip_code, '\\n',
