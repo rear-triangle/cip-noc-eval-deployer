@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
-import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import aiohttp
+import google.auth
+from google.auth import impersonated_credentials
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 
@@ -23,14 +23,11 @@ class LLMClientConfig:
     timeout_s: int = 300
     max_retries: int = 4
 
-    # Auth mode:
-    # - "oidc" (default): send Authorization: Bearer <ID_TOKEN>
-    # - "none": do not send auth header (only works if your Cloud Run service is public)
+    # "oidc" (Cloud Run private) | "none" (public / no auth)
     auth_mode: str = "oidc"
 
     # Optional local-dev helper:
-    # If set, we can mint an ID token via gcloud impersonation:
-    #   gcloud auth print-identity-token --impersonate-service-account=... --audiences=...
+    # If set, we mint an audience-bound ID token by impersonating this SA
     impersonate_service_account: Optional[str] = None
 
 
@@ -39,71 +36,100 @@ class LLMClient:
         self.cfg = cfg
         self._audience = cfg.base_url.rstrip("/")
 
-    def _get_oidc_token(self) -> Optional[str]:
+    def _get_oidc_token(self) -> str:
         """
-        Token order (most reliable first):
+        Token selection order:
 
-        1) MANUAL_ID_TOKEN env var (explicit override; matches your old working codebase)
-        2) In GCP (Cloud Run/Compute): id_token.fetch_id_token() uses metadata server
-        3) Local fallback via gcloud impersonation (if configured + gcloud exists)
-
-        Note: User ADC credentials (application_default_credentials.json) typically cannot mint
-        audience-bound ID tokens. That's why BigQuery works but fetch_id_token fails locally.
+        0) If auth_mode == "none": no token
+        1) If MANUAL_ID_TOKEN is provided (local smoke tests): use it
+        2) If impersonate_service_account is set: mint via IAMCredentials (no gcloud required)
+        3) Otherwise: try metadata-server minting (works on Cloud Run/GCE)
         """
+        if self.cfg.auth_mode == "none":
+            return ""
+
+        # 1) Local override (what you already proved works)
         manual = os.getenv("MANUAL_ID_TOKEN")
         if manual:
             return manual.strip()
 
         req = Request()
 
-        # Works in GCP environments (metadata server present)
+        # 2) Impersonation path (no need for gcloud in container)
+        if self.cfg.impersonate_service_account:
+            source_creds, _ = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+
+            id_creds = impersonated_credentials.IDTokenCredentials(
+                source_credentials=source_creds,
+                target_principal=self.cfg.impersonate_service_account,
+                target_audience=self._audience,
+                include_email=True,
+            )
+            id_creds.refresh(req)
+
+            if not getattr(id_creds, "token", None):
+                raise RuntimeError("Impersonated ID token credential returned no token.")
+            return id_creds.token
+
+        # 3) In-GCP environments (Cloud Run/Compute metadata server)
         try:
             return id_token.fetch_id_token(req, self._audience)
-        except Exception:
-            pass
+        except Exception as e:
+            raise RuntimeError(
+                "Could not mint an OIDC ID token.\n\n"
+                "Local options:\n"
+                "  A) Export MANUAL_ID_TOKEN on your host and pass it into docker:\n"
+                f'     MANUAL_ID_TOKEN=$(gcloud auth print-identity-token --audiences="{self._audience}" '
+                "--impersonate-service-account=YOUR_SA@PROJECT.iam.gserviceaccount.com)\n"
+                "  B) Set llm.impersonate_service_account in config (requires Token Creator)\n"
+                '  C) Make the Cloud Run service public and set llm.auth_mode: "none"\n\n'
+                "GCP option:\n"
+                "  - Run this on Cloud Run where metadata server is available.\n"
+            ) from e
 
-        # Local fallback via gcloud impersonation (only if configured and gcloud exists)
-        if self.cfg.impersonate_service_account and shutil.which("gcloud"):
-            cmd = [
-                "gcloud",
-                "auth",
-                "print-identity-token",
-                f"--impersonate-service-account={self.cfg.impersonate_service_account}",
-                f"--audiences={self._audience}",
-            ]
-            try:
-                out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).strip()
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(
-                    "Failed to mint ID token via gcloud.\n"
-                    f"Command: {' '.join(cmd)}\n"
-                    f"Output:\n{e.output}"
-                ) from e
+    @staticmethod
+    def _extract_json_obj(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
 
-            if not out:
-                raise RuntimeError("gcloud returned an empty identity token.")
-            return out
+        s = text.strip()
 
-        # If we got here, we don't have a way to mint a token in this environment
-        raise RuntimeError(
-            "Could not mint an OIDC ID token for Cloud Run.\n\n"
-            "This commonly happens locally because ADC user credentials "
-            "(application_default_credentials.json) can access BigQuery but cannot mint "
-            "audience-bound ID tokens.\n\n"
-            "Fix options:\n"
-            "  A) (Recommended for local smoke tests) Export MANUAL_ID_TOKEN from your host:\n"
-            "     MANUAL_ID_TOKEN=$(gcloud auth print-identity-token --audiences=\"{aud}\")\n"
-            "     and pass -e MANUAL_ID_TOKEN into docker.\n\n"
-            "  B) Set llm.impersonate_service_account in configs/dev.yaml and ensure gcloud exists in the container.\n"
-            "  C) Make the LLM Cloud Run service public and set llm.auth_mode: \"none\".\n"
-            .format(aud=self._audience)
-        )
+        # Remove common prefixes
+        for prefix in (
+            "Here is the JSON output:",
+            "Here is the JSON response:",
+            "JSON:",
+        ):
+            if s.startswith(prefix):
+                s = s[len(prefix):].strip()
+
+        # Handle fenced code blocks
+        if "```" in s:
+            parts = s.split("```")
+            for p in parts:
+                p = p.strip()
+                if p.startswith("{") and p.endswith("}"):
+                    s = p
+                    break
+
+        start = s.find("{")
+        end = s.rfind("}")
+        if start == -1 or end == -1:
+            return None
+
+        try:
+            obj = json.loads(s[start:end + 1])
+            return obj if isinstance(obj, dict) else None
+        except json.JSONDecodeError:
+            return None
 
     async def infer_json(self, session: aiohttp.ClientSession, prompt_text: str) -> Dict[str, Any]:
         url = self.cfg.base_url.rstrip("/") + self.cfg.generate_path
 
         headers = {"Content-Type": "application/json"}
-        if self.cfg.auth_mode.lower() != "none":
+        if self.cfg.auth_mode != "none":
             token = self._get_oidc_token()
             headers["Authorization"] = f"Bearer {token}"
 
@@ -125,11 +151,11 @@ class LLMClient:
 
                     raw_text = (data.get("response") or "").strip()
 
-                    # Your prompt asks for JSON only, so parse it
-                    try:
-                        return json.loads(raw_text)
-                    except json.JSONDecodeError:
-                        return {"parse_error": True, "raw_response": raw_text, "ollama": data}
+                    parsed = self._extract_json_obj(raw_text)
+                    if parsed is not None:
+                        return parsed
+
+                    return {"parse_error": True, "raw_response": raw_text, "ollama": data}
 
             except Exception as e:
                 last_err = e
