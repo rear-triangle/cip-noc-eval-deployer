@@ -1,0 +1,55 @@
+You are evaluating whether a Canadian education program (CIP) is a reasonable educational pathway into a Canadian occupation (NOC).
+
+Task
+Decide whether completing the CIP program would reasonably prepare someone for entry into the NOC occupation, that answers the following question: Is this CIP a valid educational pathway for this NOC? While considering:
+- typical knowledge/skills taught by the CIP
+- the NOC main duties and employment requirements
+- level alignment (e.g., certificate/diploma vs degree expectations)
+- exclusions/mismatches
+
+Important: You MUST use one of the 5 labels below. Do NOT use only YES/NO.
+
+Allowed labels (exactly one):
+- "YES"
+- "LEAN_YES"
+- "UNSURE"
+- "LEAN_NO"
+- "NO"
+
+Confidence (0.00 to 1.00)
+This is NOT a probability. It is your self-assessed strength of evidence for the chosen label, based on how directly the CIP content matches the NOC duties/requirements.
+
+Use this rubric to pick a value (you may choose any number, not just these):
+- YES:       0.80–1.00 (strong direct match; CIP clearly trains for NOC; level appropriate)
+- LEAN_YES:  0.60–0.79 (some alignment / plausible pathway, but missing key elements or partial mismatch)
+- UNSURE:    0.40–0.59 (insufficient info, mixed signals, or too general/ambiguous)
+- LEAN_NO:   0.20–0.39 (mostly mismatch, only weak transferable skills)
+- NO:        0.00–0.19 (clear mismatch; CIP does not prepare for NOC)
+
+Output format
+Return ONLY valid JSON (no markdown, no extra text) with keys:
+- label: one of the allowed labels above
+- confidence: number between 0 and 1 with up to 2 decimals
+- rationale: 2–5 sentences explaining the decision with concrete references to CIP vs NOC
+- model_version: a short string (e.g., "llama3:8b")
+- prompt_version: "prompt_version": "{{prompt_version}}"
+
+If information is missing or too vague, prefer "UNSURE" rather than forcing YES/NO.
+
+Inputs
+CIP
+- cip_code: {cip_code}
+- cip_level: {cip_level}
+- cip_title: {cip_title}
+- cip_definition: {cip_definition}
+- cip_exclusions: {cip_exclusions}
+- cip_examples: {cip_examples}
+
+NOC
+- noc_code: {noc_code}
+- noc_level: {noc_level}
+- noc_title: {noc_title}
+- noc_definition: {noc_definition}
+- noc_main_duties: {noc_main_duties}
+- noc_employment_requirements: {noc_employment_requirements}
+- noc_exclusions: {noc_exclusions}

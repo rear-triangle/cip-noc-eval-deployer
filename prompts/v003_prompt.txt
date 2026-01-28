@@ -1,0 +1,80 @@
+You are evaluating whether a Canadian education program (CIP) is a reasonable educational pathway into a Canadian occupation (NOC).
+
+This is a single-turn evaluation task. All required inputs are provided below.
+
+Task
+Decide whether completing the CIP program would reasonably prepare someone for entry into the NOC occupation.
+
+Answer the question:
+Is this CIP a valid educational pathway for this NOC?
+
+Base your decision on:
+- the typical knowledge and skills taught by the CIP
+- the NOC main duties and employment requirements
+- level alignment (e.g., certificate/diploma vs degree expectations)
+- exclusions, mismatches, or missing requirements
+
+Important rules
+- You MUST choose exactly ONE label from the list below.
+- Do NOT use only YES/NO.
+- Do NOT ask for clarification.
+- Do NOT request additional information.
+- Do NOT restate the task.
+- You must now perform the evaluation using the inputs provided.
+
+Allowed labels (exactly one)
+- "YES"
+- "LEAN_YES"
+- "UNSURE"
+- "LEAN_NO"
+- "NO"
+
+Confidence (0.00 to 1.00)
+This is NOT a probability.
+It is your self-assessed strength of evidence for the chosen label, based on how directly the CIP content matches the NOC duties and requirements.
+
+Use this rubric to select a value (you may choose any number within the range):
+- YES:       0.80–1.00 (strong direct match; CIP clearly trains for NOC; level appropriate)
+- LEAN_YES:  0.60–0.79 (plausible pathway with partial alignment or missing elements)
+- UNSURE:    0.40–0.59 (mixed signals, insufficient specificity, or ambiguous alignment)
+- LEAN_NO:   0.20–0.39 (mostly mismatch; only weakly transferable skills)
+- NO:        0.00–0.19 (clear mismatch; CIP does not prepare for NOC)
+
+Output format
+Return ONLY valid JSON.
+Do NOT include markdown, commentary, or extra text.
+
+The JSON object must contain exactly these keys:
+- label
+- confidence
+- rationale
+- model_version
+- prompt_version
+
+Where:
+- label is one of the allowed labels above
+- confidence is a number between 0 and 1 with up to 2 decimals
+- rationale is 2–5 sentences citing concrete aspects of the CIP and NOC
+- model_version is a short string (e.g., "llama3:8b")
+- prompt_version must be "{{prompt_version}}"
+
+If the information is too vague or insufficient, choose "UNSURE" rather than forcing YES or NO.
+
+Inputs
+
+CIP
+- cip_code: {{cip_code}}
+- cip_level: {{cip_level}}
+- cip_title: {{cip_title}}
+- cip_definition: {{cip_definition}}
+- cip_exclusions: {{cip_exclusions}}
+- cip_examples: {{cip_examples}}
+
+NOC
+- noc_code: {{noc_code}}
+- noc_level: {{noc_level}}
+- noc_title: {{noc_title}}
+- noc_definition: {{noc_definition}}
+- noc_main_duties: {{noc_main_duties}}
+- noc_employment_requirements: {{noc_employment_requirements}}
+- noc_exclusions: {{noc_exclusions}}

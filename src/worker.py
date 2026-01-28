@@ -184,8 +184,7 @@ async def main() -> None:
             model=llm_cfg.get("model", "llama3"),
             timeout_s=int(llm_cfg.get("timeout_s", 300)),
             max_retries=int(llm_cfg.get("max_retries", 4)),
-            auth_mode=str(llm_cfg.get("auth_mode", "oidc")),
-            impersonate_service_account=llm_cfg.get("impersonate_service_account"),
+
         )
     )
 
@@ -248,7 +247,36 @@ async def main() -> None:
                 "latency_ms": latency_ms,
             }
 
-        results: List[Dict[str, Any]] = await asyncio.gather(*(process_row(r) for r in rows))
+        results = await asyncio.gather(*(process_row(r) for r in rows), return_exceptions=True)
+
+        clean: List[Dict[str, Any]] = []
+        for r, out in zip(rows, results):
+            if isinstance(out, Exception):
+                # record a failure row instead of crashing the shard
+                clean.append({
+                    "run_id": r["run_id"],
+                    "pair_id": int(r["pair_id"]),
+                    "cip_code": r["cip_code"],
+                    "cip_level": int(r["cip_level"]),
+                    "noc_code": r["noc_code"],
+                    "noc_level": int(r["noc_level"]),
+                    "prompt_version": r["prompt_version"],
+                    "input_payload_hash": r["input_payload_hash"],
+                    "cip_title": r["cip_title"],
+                    "noc_title": r["noc_title"],
+                    "label": None,
+                    "confidence": None,
+                    "rationale": None,
+                    "model_version": None,
+                    "response_json": json.dumps({"error": str(out)}, ensure_ascii=False),
+                    "semantic_cosine_similarity": None,
+                    "created_at": None,
+                    "latency_ms": None,
+                })
+            else:
+                clean.append(out)
+
+        results = clean
 
     batch_size = int(llm_cfg.get("batch_size", 50))
     for i in range(0, len(results), batch_size):

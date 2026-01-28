@@ -37,12 +37,11 @@ def build_inputs_query(
     max_pairs: Optional[int] = None,
 ) -> str:
     """
-    Returns a StandardSQL query that yields the input rows for a given shard.
+    Option A: Apply a GLOBAL cap first (deterministic "random" order),
+    then shard the capped set.
 
-    Assumptions:
-    - CIP/NOC canonical tables live in refs.canonical_dataset
-    - pairs + results live in refs.ops_dataset (your current setup)
-    - results table contains run_id + pair_id so we can skip already-done work
+    This ensures --max-pairs N means ~N total across all shards,
+    not N-per-shard, and avoids bias from ORDER BY pair_id.
 
     Output columns match what worker.py expects.
     """
@@ -54,15 +53,25 @@ def build_inputs_query(
     canon = refs.canonical_dataset
     ops = refs.ops_dataset
 
-    # IMPORTANT: pairs are in OPS dataset in your setup
     pairs_tbl = f"`{project}.{ops}.{tables.pairs}`"
     cip_tbl = f"`{project}.{canon}.{tables.cip_canonical}`"
     noc_tbl = f"`{project}.{canon}.{tables.noc_canonical}`"
     results_tbl = f"`{project}.{ops}.{tables.results}`"
 
-    limit_clause = ""
+    # If max_pairs is set, we cap globally using a deterministic ordering
+    # based on FARM_FINGERPRINT(pair_key). Otherwise, no cap.
+    cap_clause = ""
     if max_pairs is not None and int(max_pairs) > 0:
-        limit_clause = f"\nLIMIT {int(max_pairs)}"
+        cap_clause = f"""
+  capped AS (
+    SELECT *
+    FROM todo
+    QUALIFY ROW_NUMBER() OVER (ORDER BY ABS(FARM_FINGERPRINT(pair_key))) <= {int(max_pairs)}
+  ),
+"""
+        sharded_source = "capped"
+    else:
+        sharded_source = "todo"
 
     sql = f"""
 WITH
@@ -89,13 +98,11 @@ WITH
       ON r.run_id = @run_id
      AND r.pair_id = fp.pair_id
     WHERE r.pair_id IS NULL
-    ORDER BY fp.pair_id
-    {limit_clause}
   ),
-
+{cap_clause}
   sharded AS (
     SELECT *
-    FROM todo
+    FROM {sharded_source}
     WHERE MOD(ABS(FARM_FINGERPRINT(pair_key)), {int(n_shards)}) = {int(shard_index)}
   ),
 
