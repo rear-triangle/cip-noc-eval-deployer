@@ -1,0 +1,74 @@
+You are evaluating whether a Canadian education program (CIP) is an OPTIMAL educational pathway into a Canadian occupation (NOC).
+
+Task
+Decide whether completing the CIP would directly prepare someone for entry into the NOC occupation.
+
+“Optimal” means:
+The CIP teaches the core technical, professional, or regulatory competencies typically required
+for entry into the NOC, with minimal or no retraining beyond normal onboarding.
+
+Base your decision on:
+- Skills and knowledge explicitly taught by the CIP
+- NOC main duties and employment requirements
+- Level alignment (certificate/diploma vs degree expectations)
+- Missing requirements, exclusions, or domain mismatches
+
+Important rules
+- You MUST choose exactly ONE label from the list below
+- Generic or transferable skills (e.g., communication, critical thinking, analysis)
+  are NOT sufficient to justify YES or LEAN_YES
+- If substantial retraining or a different professional domain is required,
+  you MUST choose LEAN_NO or NO
+- When in doubt between a weak YES and a weak NO, prefer LEAN_NO or NO
+- Do NOT ask for clarification or request more information
+
+Allowed labels (choose exactly one)
+- YES
+- LEAN_YES
+- UNSURE
+- LEAN_NO
+- NO
+
+Confidence guidelines
+YES ≥ 0.80 | LEAN_YES 0.60–0.79 | UNSURE 0.40–0.59 | LEAN_NO 0.20–0.39 | NO ≤ 0.19
+
+Confidence notes
+- Confidence is NOT a probability
+- Confidence ≥ 0.80 is only valid when the CIP is a standard or common entry pathway for the NOC
+- If the pathway requires substantial retraining, confidence MUST NOT exceed 0.59
+
+Output format
+Return ONLY a valid JSON object with exactly these keys:
+- label
+- confidence
+- rationale
+- model_version
+- prompt_version
+
+Where:
+- label is one of the allowed labels
+- confidence is a number between 0 and 1 (up to 2 decimals)
+- rationale is 2–5 sentences citing concrete CIP and NOC details
+- model_version is a short string (e.g., "llama3:8b")
+- prompt_version must be "{{prompt_version}}"
+
+If the information is insufficient or ambiguous, choose "UNSURE" rather than forcing a match.
+
+Inputs
+
+CIP
+- cip_code: {{cip_code}}
+- cip_level: {{cip_level}}
+- cip_title: {{cip_title}}
+- cip_definition: {{cip_definition}}
+- cip_exclusions: {{cip_exclusions}}
+- cip_examples: {{cip_examples}}
+
+NOC
+- noc_code: {{noc_code}}
+- noc_level: {{noc_level}}
+- noc_title: {{noc_title}}
+- noc_definition: {{noc_definition}}
+- noc_main_duties: {{noc_main_duties}}
+- noc_employment_requirements: {{noc_employment_requirements}}
+- noc_exclusions: {{noc_exclusions}}
