@@ -14,23 +14,28 @@ tables:
 
 llm:
   base_url: "https://ollama-gcs-llama3-gpu-228291553312.us-east4.run.app"
-
   model: "llama3:8b"
+  generate_path: "/api/generate"
 
-  # Give enough time for cold starts + long generations
   timeout_s: 1800
-
-  # Be patient with Cloud Run "service not ready yet" 503s
   max_retries: 12
 
-  # Keep low until you confirm stability
-  concurrency: 2
+  concurrency: 1
   batch_size: 50
 
-  # Optional but strongly recommended once you add the code:
-  # stagger_s: 10         # shard i waits i*10s before starting
-  # ready_retries: 30     # readiness probe attempts
-  # ready_sleep_s: 10     # seconds between readiness attempts
+  stagger_s: 5
+  ready_retries: 30
+  ready_sleep_s: 5
+
+  # NEW: generation controls
+  temperature: 0.1
+
+  # Cap output tokens (prevents rambles; too low can truncate JSON)
+  num_predict: 220
+
+  # CSV list used by llm_client to build stop sequences
+  # Keep ``` to kill code fences; extra Rationale stops get appended in code
+  stop_csv: "```"
 
   impersonate_service_account: null
 

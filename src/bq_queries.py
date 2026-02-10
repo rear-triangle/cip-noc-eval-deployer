@@ -21,13 +21,12 @@ class TableRefs:
 
 
 def _sql_array_int(values: List[int]) -> str:
-    # Safe because values are ints from CLI parsing
     return "[" + ", ".join(str(int(v)) for v in values) + "]"
 
 
 def build_inputs_query(
-    refs: DatasetRefs,
-    tables: TableRefs,
+    refs: "DatasetRefs",
+    tables: "TableRefs",
     run_id: str,
     prompt_version: str,
     cip_levels: List[int],
@@ -36,16 +35,6 @@ def build_inputs_query(
     shard_index: int,
     max_pairs: Optional[int] = None,
 ) -> str:
-    """
-    Option A: Apply a GLOBAL cap first (deterministic "random" order),
-    then shard the capped set.
-
-    This ensures --max-pairs N means ~N total across all shards,
-    not N-per-shard, and avoids bias from ORDER BY pair_id.
-
-    Output columns match what worker.py expects.
-    """
-
     cip_levels_sql = _sql_array_int(cip_levels)
     noc_levels_sql = _sql_array_int(noc_levels)
 
@@ -58,8 +47,6 @@ def build_inputs_query(
     noc_tbl = f"`{project}.{canon}.{tables.noc_canonical}`"
     results_tbl = f"`{project}.{ops}.{tables.results}`"
 
-    # If max_pairs is set, we cap globally using a deterministic ordering
-    # based on FARM_FINGERPRINT(pair_key). Otherwise, no cap.
     cap_clause = ""
     if max_pairs is not None and int(max_pairs) > 0:
         cap_clause = f"""

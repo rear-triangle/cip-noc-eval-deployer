@@ -1,0 +1,102 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ollama-gcs-llama3-gpu
+  namespace: '228291553312'
+  selfLink: /apis/serving.knative.dev/v1/namespaces/228291553312/services/ollama-gcs-llama3-gpu
+  uid: bf948d4e-b928-4506-af22-c1490b12907a
+  resourceVersion: AAZJj8KMcjc
+  generation: 7
+  creationTimestamp: '2025-09-26T20:11:02.944575Z'
+  labels:
+    run.googleapis.com/satisfiesPzs: 'true'
+    cloud.googleapis.com/location: us-east4
+  annotations:
+    serving.knative.dev/creator: alvaro.balkowski@lmic-cimt.ca
+    serving.knative.dev/lastModifier: alvaro.balkowski@lmic-cimt.ca
+    run.googleapis.com/client-name: gcloud
+    run.googleapis.com/client-version: 554.0.0
+    run.googleapis.com/operation-id: ccd0cb0f-76a9-4a05-ac85-1cdaea230926
+    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress-status: all
+    run.googleapis.com/maxScale: '1'
+    run.googleapis.com/urls: '["https://ollama-gcs-llama3-gpu-228291553312.us-east4.run.app","https://ollama-gcs-llama3-gpu-qfxqn24qia-uk.a.run.app"]'
+spec:
+  template:
+    metadata:
+      labels:
+        client.knative.dev/nonce: ysxxxdzkft
+        run.googleapis.com/startupProbeType: Default
+      annotations:
+        autoscaling.knative.dev/maxScale: '3'
+        autoscaling.knative.dev/minScale: '1'
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/client-version: 554.0.0
+        run.googleapis.com/gpu-zonal-redundancy-disabled: 'true'
+        run.googleapis.com/cpu-throttling: 'false'
+        run.googleapis.com/startup-cpu-boost: 'true'
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 300
+      serviceAccountName: 228291553312-compute@developer.gserviceaccount.com
+      containers:
+      - name: ollama-1
+        image: ollama/ollama:0.12.1
+        ports:
+        - name: http1
+          containerPort: 8080
+        env:
+        - name: OLLAMA_HOST
+          value: 0.0.0.0:8080
+        - name: OLLAMA_DEBUG
+          value: 'false'
+        - name: OLLAMA_KEEP_ALIVE
+          value: '-1'
+        - name: GIN_MODE
+          value: release
+        resources:
+          limits:
+            cpu: 8000m
+            nvidia.com/gpu: '1'
+            memory: 32Gi
+        volumeMounts:
+        - name: gcs-1
+          mountPath: /root/.ollama
+        startupProbe:
+          timeoutSeconds: 240
+          periodSeconds: 240
+          failureThreshold: 1
+          tcpSocket:
+            port: 8080
+      volumes:
+      - name: gcs-1
+        csi:
+          driver: gcsfuse.run.googleapis.com
+          volumeAttributes:
+            bucketName: lmic-dev-datahub-ollama-llama3-8b-gpu
+      nodeSelector:
+        run.googleapis.com/accelerator: nvidia-l4
+  traffic:
+  - percent: 100
+    latestRevision: true
+status:
+  observedGeneration: 7
+  conditions:
+  - type: Ready
+    status: 'True'
+    lastTransitionTime: '2026-01-30T00:07:33.399095Z'
+  - type: ConfigurationsReady
+    status: 'True'
+    lastTransitionTime: '2026-01-30T00:07:32.105478Z'
+  - type: RoutesReady
+    status: 'True'
+    lastTransitionTime: '2026-01-30T00:07:33.353362Z'
+  latestReadyRevisionName: ollama-gcs-llama3-gpu-00007-kxd
+  latestCreatedRevisionName: ollama-gcs-llama3-gpu-00007-kxd
+  traffic:
+  - revisionName: ollama-gcs-llama3-gpu-00007-kxd
+    percent: 100
+    latestRevision: true
+  url: https://ollama-gcs-llama3-gpu-qfxqn24qia-uk.a.run.app
+  address:
+    url: https://ollama-gcs-llama3-gpu-qfxqn24qia-uk.a.run.app

@@ -1,0 +1,49 @@
+TASK
+Evaluate if a Canadian education program (CIP) is an OPTIMAL pathway into a Canadian occupation (NOC).
+
+OPTIMAL = CIP teaches core technical/professional/regulatory competencies normally required for entry with minimal retraining beyond onboarding.
+
+RULES
+- Output exactly ONE label: YES | LEAN_YES | UNSURE | LEAN_NO | NO
+- Use only provided CIP/NOC info
+- Generic skills (communication, critical thinking, etc.) never justify YES/LEAN_YES
+- Domain mismatch OR missing required credentials/training => LEAN_NO or NO
+- If uncertain => UNSURE
+
+CONFIDENCE (JSON number 0–1, 2 decimals max)
+YES ≥0.80
+LEAN_YES 0.60–0.79
+UNSURE 0.40–0.59
+LEAN_NO 0.20–0.39
+NO ≤0.19
+
+Constraints
+- ≥0.80 only if common/standard entry pathway
+- If substantial retraining required => confidence ≤0.59
+
+OUTPUT
+Return ONLY JSON with keys:
+label, confidence, rationale, model_version, prompt_version
+
+rationale: 1–2 short sentences referencing concrete CIP + NOC details
+model_version: short string
+prompt_version: "{{prompt_version}}"
+
+INPUT
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}
