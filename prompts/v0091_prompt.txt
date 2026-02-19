@@ -1,0 +1,100 @@
+You are evaluating whether a Canadian education program (CIP) is an OPTIMAL educational pathway into a Canadian occupation (NOC).
+
+Task
+Decide whether completing the CIP would directly prepare someone for entry into the NOC occupation.
+
+“Optimal” means:
+The CIP teaches the core technical, professional, or regulatory competencies typically required for entry into the NOC, with minimal or no retraining beyond normal onboarding.
+
+Base your decision mainly on:
+- NOC employment requirements (PRIMARY)
+- CIP text (definition/exclusions/examples/title) as evidence of intended preparation
+- NOC main duties as supporting context
+- Level alignment (trade/diploma/degree/professional/residency)
+- Domain mismatch, missing requirements, or exclusions
+
+PRIMARY DECISION RULE (most important)
+If the CIP does not logically lead into the NOC employment requirements described in the provided text, choose LEAN_NO or NO.
+
+HIGH-STAKES RELIABILITY RULE (avoid false YES)
+You must be conservative. False positives are worse than false negatives.
+
+You may choose YES or LEAN_YES ONLY IF BOTH are true:
+1) The CIP text contains at least one explicit pathway signal of intended preparation for that profession/field (examples: named profession prep, licensure/registration intent, apprenticeship/trade prep, practicum/clinical placement, board exam/residency preparation, or wording like “prepares students for [occupation/field]”).
+AND
+2) That signal aligns with a specific NOC employment requirement OR a central NOC main duty.
+
+If you cannot cite an explicit pathway signal from the CIP text, you MUST NOT choose YES or LEAN_YES.
+
+ANTI-GENERIC / ANTI-HALLUCINATION RULE
+Generic or transferable skills (communication, critical thinking, analysis, organization, leadership, teamwork, “overlap”, “plausible”, “adjacent/related field”) NEVER justify YES or LEAN_YES.
+If your reasoning would use words like transferable/generic/overlap/plausible/adjacent/related, you MUST choose LEAN_NO or NO (or UNSURE if truly ambiguous).
+
+SPECIAL CASE: “Not for credit” / “skills” / “basic” / “citizenship” style CIPs
+If the CIP title/definition indicates “not for credit”, “basic skills”, “personal decision-making”, “citizenship activities”, “stress management”, “collecting”, or similarly non-credential/non-occupational training:
+- Default to NO unless the CIP text explicitly names the occupation/profession or a required credential pathway for the NOC.
+- These almost never justify YES or LEAN_YES.
+
+CREDENTIAL-GATED OCCUPATIONS (hard rule)
+If NOC employment requirements mention licensing, certification, registration, regulated profession, board exam, residency, or apprenticeship:
+- The CIP must clearly represent preparation for that pathway based on the CIP text.
+- If not, choose NO (or LEAN_NO only if the CIP text strongly indicates the same profession/field but is missing explicit pathway wording).
+
+DOMAIN MISMATCH (hard rule)
+If CIP and NOC are clearly different professional domains, choose NO even if some skills overlap.
+
+WHEN UNSURE
+If information is insufficient or ambiguous, choose UNSURE.
+However, if the only possible support for YES would be generic/transferable skills or vague adjacency, prefer LEAN_NO over UNSURE.
+
+Allowed labels (choose exactly one)
+YES
+LEAN_YES
+UNSURE
+LEAN_NO
+NO
+
+Confidence guidelines
+YES ≥ 0.80 | LEAN_YES 0.60–0.79 | UNSURE 0.40–0.59 | LEAN_NO 0.20–0.39 | NO ≤ 0.19
+
+Confidence notes
+- Confidence is NOT a probability.
+- Confidence ≥ 0.80 is only valid when the CIP is a standard/common entry pathway based on explicit pathway signals.
+- If substantial retraining is implied, or the pathway signal is weak/indirect, confidence MUST NOT exceed 0.59.
+- Do not reuse the same confidence repeatedly; choose values that reflect evidence strength.
+
+Output format
+Return ONLY a valid JSON object with exactly these keys:
+label
+confidence
+rationale
+model_version
+prompt_version
+
+Rationale requirements (1–2 sentences)
+Must cite:
+- one concrete CIP detail AND
+- one concrete NOC employment requirement or main duty.
+If choosing YES/LEAN_YES, the CIP detail MUST be an explicit pathway signal (not a generic skill).
+
+model_version: short string (e.g., "llama3:8b")
+prompt_version must be "{{prompt_version}}"
+
+Inputs
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}

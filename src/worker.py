@@ -70,7 +70,13 @@ def _validate_args(args: argparse.Namespace) -> List[str]:
     return missing
 
 
-async def _wait_for_llm_ready(llm: LLMClient, session: aiohttp.ClientSession, prompt_text: str, ready_retries: int, ready_sleep_s: int) -> None:
+async def _wait_for_llm_ready(
+    llm: LLMClient,
+    session: aiohttp.ClientSession,
+    prompt_text: str,
+    ready_retries: int,
+    ready_sleep_s: int,
+) -> None:
     last_err: Optional[Exception] = None
     for i in range(1, ready_retries + 1):
         try:
@@ -79,7 +85,17 @@ async def _wait_for_llm_ready(llm: LLMClient, session: aiohttp.ClientSession, pr
             return
         except Exception as e:
             last_err = e
-            print(json.dumps({"msg": "llm not ready yet", "ready_attempt": i, "ready_retries": ready_retries, "sleep_s": ready_sleep_s, "error": str(e)}))
+            print(
+                json.dumps(
+                    {
+                        "msg": "llm not ready yet",
+                        "ready_attempt": i,
+                        "ready_retries": ready_retries,
+                        "sleep_s": ready_sleep_s,
+                        "error": str(e),
+                    }
+                )
+            )
             await asyncio.sleep(ready_sleep_s)
     raise RuntimeError(f"LLM never became ready after {ready_retries} attempts. Last error: {last_err}")
 
@@ -89,22 +105,29 @@ async def main() -> None:
     args = parser.parse_args()
     missing = _validate_args(args)
 
-    print(json.dumps({
-        "msg": "worker starting",
-        "run_id": args.run_id,
-        "config": args.config,
-        "prompt_path": args.prompt_path,
-        "prompt_version": args.prompt_version,
-        "cip_levels": args.cip_levels,
-        "noc_levels": args.noc_levels,
-        "n_shards": args.n_shards,
-        "shard_index": args.shard_index,
-        "max_pairs": args.max_pairs,
-        "missing_inputs": missing,
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "msg": "worker starting",
+                "run_id": args.run_id,
+                "config": args.config,
+                "prompt_path": args.prompt_path,
+                "prompt_version": args.prompt_version,
+                "cip_levels": args.cip_levels,
+                "noc_levels": args.noc_levels,
+                "n_shards": args.n_shards,
+                "shard_index": args.shard_index,
+                "max_pairs": args.max_pairs,
+                "missing_inputs": missing,
+            },
+            ensure_ascii=False,
+        )
+    )
 
     if missing:
-        raise SystemExit("Missing required inputs: " + ", ".join(missing) + "\nProvide CLI flags or the corresponding env vars.")
+        raise SystemExit(
+            "Missing required inputs: " + ", ".join(missing) + "\nProvide CLI flags or the corresponding env vars."
+        )
 
     cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
 
@@ -163,6 +186,7 @@ async def main() -> None:
             timeout_s=int(llm_cfg.get("timeout_s", 1800)),
             max_retries=int(llm_cfg.get("max_retries", 12)),
             temperature=float(llm_cfg.get("temperature", 0.1)),
+            top_p=float(llm_cfg.get("top_p", 0.9)),
             num_predict=int(llm_cfg.get("num_predict", 220)),
             stop_csv=str(llm_cfg.get("stop_csv", "```,")),
         )
@@ -228,9 +252,8 @@ async def main() -> None:
                 resp = await llm.infer_json(session, prompt_text)
                 latency_ms = int((time.time() - t0) * 1000)
 
-            # Prefer parsed fields; if parse_error but salvaged exists, use salvaged fields.
             label = _safe_get(resp, "label", None)
-            confidence = _safe_get(resp, "confidence", None)
+            evidence_grade = _safe_get(resp, "evidence_grade", None)
             rationale = _safe_get(resp, "rationale", None)
             model_version = _safe_get(resp, "model_version", None)
 
@@ -248,7 +271,7 @@ async def main() -> None:
                 "cip_title": r["cip_title"],
                 "noc_title": r["noc_title"],
                 "label": label,
-                "confidence": float(confidence) if confidence is not None else None,
+                "evidence_grade": evidence_grade,
                 "rationale": rationale,
                 "model_version": model_version,
                 "response_json": json.dumps(resp, ensure_ascii=False),
@@ -263,26 +286,28 @@ async def main() -> None:
         for r, out in zip(rows, results):
             now_iso = datetime.now(timezone.utc).isoformat()
             if isinstance(out, Exception):
-                clean.append({
-                    "run_id": r["run_id"],
-                    "pair_id": int(r["pair_id"]),
-                    "cip_code": r["cip_code"],
-                    "cip_level": int(r["cip_level"]),
-                    "noc_code": r["noc_code"],
-                    "noc_level": int(r["noc_level"]),
-                    "prompt_version": r["prompt_version"],
-                    "input_payload_hash": r["input_payload_hash"],
-                    "cip_title": r["cip_title"],
-                    "noc_title": r["noc_title"],
-                    "label": None,
-                    "confidence": None,
-                    "rationale": None,
-                    "model_version": None,
-                    "response_json": json.dumps({"error": str(out)}, ensure_ascii=False),
-                    "semantic_cosine_similarity": None,
-                    "created_at": now_iso,
-                    "latency_ms": None,
-                })
+                clean.append(
+                    {
+                        "run_id": r["run_id"],
+                        "pair_id": int(r["pair_id"]),
+                        "cip_code": r["cip_code"],
+                        "cip_level": int(r["cip_level"]),
+                        "noc_code": r["noc_code"],
+                        "noc_level": int(r["noc_level"]),
+                        "prompt_version": r["prompt_version"],
+                        "input_payload_hash": r["input_payload_hash"],
+                        "cip_title": r["cip_title"],
+                        "noc_title": r["noc_title"],
+                        "label": None,
+                        "evidence_grade": None,
+                        "rationale": None,
+                        "model_version": None,
+                        "response_json": json.dumps({"error": str(out)}, ensure_ascii=False),
+                        "semantic_cosine_similarity": None,
+                        "created_at": now_iso,
+                        "latency_ms": None,
+                    }
+                )
             else:
                 clean.append(out)
 
@@ -292,13 +317,18 @@ async def main() -> None:
     for i in range(0, len(results), batch_size):
         writer.insert_rows(results[i : i + batch_size])
 
-    print(json.dumps({
-        "msg": "worker finished",
-        "run_id": args.run_id,
-        "shard_index": args.shard_index,
-        "n_shards": args.n_shards,
-        "inserted_n": len(results),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "msg": "worker finished",
+                "run_id": args.run_id,
+                "shard_index": args.shard_index,
+                "n_shards": args.n_shards,
+                "inserted_n": len(results),
+            },
+            ensure_ascii=False,
+        )
+    )
     print(f"Inserted {len(results)} results for shard {args.shard_index}/{args.n_shards}. run_id={args.run_id}")
 
 

@@ -1,5 +1,3 @@
-# src/result_writer.py
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,8 +24,6 @@ class ResultWriter:
 
         table_id = f"{self.target.project_id}.{self.target.dataset}.{self.target.table}"
 
-        # Deterministic insertIds for de-duplication on retries
-        # BigQuery streaming insert can de-dupe best-effort when insertId matches.
         row_ids = [f"{r['run_id']}:{r['pair_id']}" for r in rows]
 
         errors = self.bq.insert_rows_json(table_id, rows, row_ids=row_ids)

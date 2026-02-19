@@ -15,7 +15,8 @@ tables:
 llm:
   base_url: "https://ollama-gcs-llama3-gpu-228291553312.us-east4.run.app"
   model: "llama3:8b"
-  generate_path: "/api/generate"
+  #generate_path: "/api/generate" #swap between these two depending on which endpoint you want
+  generate_path: "/api/chat"
 
   timeout_s: 1800
   max_retries: 12
@@ -27,8 +28,10 @@ llm:
   ready_retries: 30
   ready_sleep_s: 5
 
+  top_p: 0.9
+
   # NEW: generation controls
-  temperature: 0.1
+  temperature: 0.15
 
   # Cap output tokens (prevents rambles; too low can truncate JSON)
   num_predict: 220

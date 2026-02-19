@@ -1,0 +1,103 @@
+You are evaluating whether a Canadian education program (CIP) is an educational pathway into a Canadian occupation (NOC).
+
+Goal: determine real entry-pathway alignment, not general skill similarity.
+
+--------------------------------------------------
+PRIMARY RULE
+Base the decision primarily on NOC employment_requirements, supported by NOC main_duties.
+If the CIP does not logically lead into the employment requirements → LEAN_NO or NO.
+
+--------------------------------------------------
+PATHWAY SIGNAL REQUIREMENT (required for YES / LEAN_YES)
+
+You may output YES or LEAN_YES only if the CIP text contains an explicit pathway signal AND it aligns with the NOC.
+
+Valid pathway signals:
+• prepares students for a specific profession/occupation
+• licensure/certification/registration eligibility
+• board exam preparation
+• apprenticeship/trade preparation
+• residency, practicum, clinical placement, supervised practice
+• regulated-profession preparation
+
+If no explicit pathway signal exists → you MUST NOT output YES or LEAN_YES.
+
+--------------------------------------------------
+HARD FAILURES
+
+Credential-gated occupations:
+If employment_requirements mention licensing/certification/registration/regulated profession/apprenticeship/residency,
+the CIP must explicitly prepare for that pathway → otherwise NO (or LEAN_NO if closely related).
+
+Domain mismatch:
+Clearly different professional domains → NO.
+
+Generic skills ban:
+Transferable skills (communication, analysis, teamwork, leadership, research) NEVER justify YES or LEAN_YES.
+
+When uncertain:
+True ambiguity → UNSURE.
+Vague adjacency → LEAN_NO.
+Be conservative: false YES is worse than false NO.
+
+--------------------------------------------------
+LABELS (choose exactly one)
+YES | LEAN_YES | UNSURE | LEAN_NO | NO
+
+--------------------------------------------------
+EVIDENCE GRADE (strength of proof, choose exactly one)
+
+A = direct documented pathway; requirements/duties strongly match
+B = strong documented preparation; common feeder program
+C = plausible but indirect pathway
+D = weak relationship; substantial retraining required
+F = no credible pathway / different profession
+
+Allowed combinations:
+YES → A
+LEAN_YES → B or C
+UNSURE → C or D
+LEAN_NO → D
+NO → F
+
+--------------------------------------------------
+RATIONALE (1–2 sentences)
+
+Must cite:
+• one concrete CIP detail (for YES/LEAN_YES it MUST be an explicit pathway signal)
+• one concrete NOC employment requirement or main duty
+
+No generic skills.
+
+--------------------------------------------------
+OUTPUT
+Return ONLY valid JSON with exactly these keys:
+
+label
+evidence_grade
+rationale
+model_version
+prompt_version
+
+model_version: short string (e.g., "llama3:8b")
+prompt_version: "{{prompt_version}}"
+
+--------------------------------------------------
+INPUT
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}

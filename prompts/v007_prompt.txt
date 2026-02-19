@@ -1,0 +1,78 @@
+TASK
+Evaluate if a Canadian education program (CIP) is an OPTIMAL pathway into a Canadian occupation (NOC).
+
+OPTIMAL = CIP teaches the core technical / professional / regulatory competencies normally required for entry, with minimal retraining beyond onboarding.
+
+RULES (must follow)
+- Output exactly ONE label: YES | LEAN_YES | UNSURE | LEAN_NO | NO
+- Use only provided CIP/NOC info (do not assume facts not present)
+- Generic skills (communication, critical thinking, etc.) never justify YES/LEAN_YES
+- You MUST use the full scale: if it is clearly NOT a pathway, choose NO (not LEAN_NO).
+
+LABEL GUIDE (decision boundaries)
+YES:
+- CIP is a common/standard direct entry pathway for this NOC AND covers the core competencies/credentials described in NOC requirements.
+- Only minor onboarding / orientation needed.
+
+LEAN_YES:
+- Strong competency alignment, but one small gap (e.g., a specific tool, context, or short bridging training).
+- Still close to a direct pathway.
+
+UNSURE:
+- Provided info is insufficient or ambiguous to determine alignment (missing key details or unclear scope).
+
+LEAN_NO:
+- Some meaningful overlap (adjacent domain), but IMPORTANT gaps exist (e.g., missing multiple core duties OR needs substantial retraining).
+- Examples: related field where skills transfer partially, but not enough for entry without significant upskilling.
+
+NO (use this more often than LEAN_NO when clearly wrong):
+Choose NO if ANY of the following are true based on the provided text:
+- Clear domain mismatch (e.g., health/counselling vs software engineering; arts vs licensed trades) with little/no overlap in core duties.
+- NOC is credential/licence/apprenticeship-gated AND CIP does not indicate that credential/training pathway.
+- CIP’s definition/exclusions indicate the program is not preparing for the NOC’s core work.
+- CIP prepares for a fundamentally different profession than the NOC (not just “missing a course”).
+
+CONFIDENCE (JSON number 0–1, 2 decimals max)
+- Confidence must be consistent with the label range:
+  YES ≥0.80
+  LEAN_YES 0.60–0.79
+  UNSURE 0.40–0.59
+  LEAN_NO 0.20–0.39
+  NO ≤0.19
+
+Calibration rules:
+- Do NOT default to the same confidence repeatedly. Pick a value that reflects strength of evidence.
+- For NO:
+  - 0.05–0.12 when obvious domain mismatch or credential-gated mismatch
+  - 0.13–0.19 when mostly mismatch but a small ambiguous overlap exists
+- For LEAN_NO:
+  - 0.20–0.29 when overlap is weak
+  - 0.30–0.39 when overlap is moderate but still not a viable entry pathway
+- If substantial retraining is required, confidence must be ≤0.59.
+
+OUTPUT
+Return ONLY JSON with keys:
+label, confidence, rationale, model_version, prompt_version
+
+rationale: 1–2 short sentences referencing concrete CIP + NOC details (mention at least 1 CIP element and 1 NOC element)
+model_version: short string
+prompt_version: "{{prompt_version}}"
+
+INPUT
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}

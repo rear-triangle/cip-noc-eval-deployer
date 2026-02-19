@@ -1,0 +1,120 @@
+You are evaluating whether a Canadian education program (CIP) is an educational pathway into a Canadian occupation (NOC).
+
+The goal is to judge real career alignment — not general skill similarity.
+
+-------------------------------------
+
+TASK
+Decide how well completing the CIP prepares someone to ENTER the NOC occupation.
+
+A true pathway means the program is normally intended to lead into that profession,
+possibly followed by standard post-graduation steps (licensing, residency, apprenticeship, certification, supervised experience).
+
+-------------------------------------
+
+IMPORTANT PRINCIPLE
+Be conservative.
+
+Only choose YES when the CIP is a typical or standard entry route into the occupation.
+
+If the fields are merely related, adjacent, or transferable,
+the answer should be LEAN_YES, LEAN_NO, or NO — not YES.
+
+When uncertain, prefer the lower label rather than the higher one.
+
+(False positives are worse than false negatives.)
+
+-------------------------------------
+
+ALLOWED LABELS (choose exactly one)
+
+YES
+The CIP is a common direct preparation for this occupation.
+
+LEAN_YES
+Strongly related field and plausibly leads into the occupation,
+but not a standard or primary pathway.
+
+UNSURE
+Insufficient or ambiguous information to determine alignment.
+
+LEAN_NO
+Some overlap exists but substantial retraining or a different specialization is required.
+
+NO
+Different profession or unrealistic pathway.
+
+-------------------------------------
+
+DECISION GUIDANCE
+
+Consider:
+• what the program trains people to become
+• the occupation’s requirements and duties
+• level expectations (trade, diploma, bachelor, professional degree, residency, etc.)
+• professional identity (what job the graduate is meant to pursue)
+
+Generic abilities (communication, analysis, teamwork, research skills) NEVER justify YES or LEAN_YES.
+
+-------------------------------------
+
+CONFIDENCE
+
+Confidence reflects strength of evidence and must follow these ranges:
+
+YES ≥ 0.80
+LEAN_YES 0.60–0.79
+UNSURE 0.40–0.59
+LEAN_NO 0.20–0.39
+NO ≤ 0.19
+
+Do not reuse the same confidence repeatedly.
+Choose values that reflect strength of match.
+
+-------------------------------------
+
+RATIONALE REQUIREMENTS
+
+1–2 concise sentences.
+
+Must reference:
+• one concrete CIP detail
+• one NOC requirement or duty
+
+Do not rely on generic skills.
+
+-------------------------------------
+
+OUTPUT FORMAT
+
+Return ONLY valid JSON with exactly these keys:
+
+label
+confidence
+rationale
+model_version
+prompt_version
+
+model_version: short string (e.g., "llama3:8b")
+prompt_version: "{{prompt_version}}"
+
+-------------------------------------
+
+INPUT
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}

@@ -13,8 +13,7 @@ def load_prompt(prompt_path: str, prompt_version: str) -> Prompt:
     return Prompt(version=prompt_version, template_text=txt)
 
 def render_prompt(prompt: Prompt, fields: Dict[str, Any]) -> str:
-    # Super simple templating: {{key}} replacement.
-    # If you prefer Jinja2 later, swap this out.
+    #i guess jinja2 could be used here instead of this simple templating but not necessary for now
     rendered = prompt.template_text.replace("{{prompt_version}}", prompt.version)
     for k, v in fields.items():
         token = "{{" + k + "}}"

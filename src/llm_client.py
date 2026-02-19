@@ -1,5 +1,3 @@
-# src/llm_client.py
-
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +8,7 @@ import random
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import aiohttp
 from google.auth.transport.requests import Request
@@ -20,19 +18,24 @@ from google.oauth2 import id_token
 @dataclass(frozen=True)
 class LLMClientConfig:
     base_url: str
-    generate_path: str = "/api/generate"
-    model: str = "llama3"
+
+    #keep this for backwards compatibility, if you wanna switch to generate instead of chat endpoint
+    generate_path: str = "/api/chat"
+
+    model: str = "llama3:8b"
     timeout_s: int = int(os.getenv("LLM_TIMEOUT_S", "1800"))
     max_retries: int = int(os.getenv("LLM_MAX_RETRIES", "8"))
 
     token_refresh_skew_s: int = int(os.getenv("LLM_TOKEN_REFRESH_SKEW_S", "120"))
     allow_manual_token: bool = os.getenv("LLM_ALLOW_MANUAL_TOKEN", "1") == "1"
 
-    # Generation controls
-    temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1"))
-    num_predict: int = int(os.getenv("LLM_NUM_PREDICT", "220"))
-    # Comma-separated stop sequences (kept simple)
+    temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.1")) #zero is total determinism
+    top_p: float = float(os.getenv("LLM_TOP_P", "0.9")) #smallest set of tokens that fit probability p, which filters out low prob tokens
+    num_predict: int = int(os.getenv("LLM_NUM_PREDICT", "220")) #token output restriction
     stop_csv: str = os.getenv("LLM_STOP", "```,")
+
+    #set seed for reproducibility if you want
+    seed: Optional[int] = int(os.getenv("LLM_SEED")) if os.getenv("LLM_SEED") else None
 
 
 class _IdTokenProvider:
@@ -117,6 +120,7 @@ class _IdTokenProvider:
 
 class LLMClient:
     LABELS = {"YES", "LEAN_YES", "UNSURE", "LEAN_NO", "NO"}
+    EVIDENCE_GRADES = {"A", "B", "C", "D", "F"}
 
     def __init__(self, cfg: LLMClientConfig):
         self.cfg = cfg
@@ -127,6 +131,27 @@ class LLMClient:
             allow_manual_token=cfg.allow_manual_token,
         )
 
+    # ----------------------------
+    # Structured output schema
+    # ----------------------------
+    @classmethod
+    def _output_schema(cls) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "label": {"type": "string", "enum": sorted(list(cls.LABELS))},
+                "evidence_grade": {"type": "string", "enum": sorted(list(cls.EVIDENCE_GRADES))},
+                "rationale": {"type": "string"},
+                "model_version": {"type": "string"},
+                "prompt_version": {"type": "string"},
+            },
+            "required": ["label", "evidence_grade", "rationale", "model_version", "prompt_version"],
+        }
+
+    # ----------------------------
+    # Parsing helpers
+    # ----------------------------
     @staticmethod
     def _strip_known_prefixes(s: str) -> str:
         s = (s or "").strip()
@@ -138,7 +163,7 @@ class LLMClient:
             "JSON:",
         ):
             if s.startswith(prefix):
-                s = s[len(prefix):].strip()
+                s = s[len(prefix) :].strip()
         return s
 
     @staticmethod
@@ -146,7 +171,6 @@ class LLMClient:
         if not s:
             return None
 
-        # Prefer fenced JSON block if present
         if "```" in s:
             parts = s.split("```")
             for p in parts:
@@ -162,24 +186,24 @@ class LLMClient:
 
     @classmethod
     def _sanitize_json(cls, js: str) -> str:
-        """
-        Fix common LLM JSON mistakes:
-        - Unquoted label tokens: "label": LEAN_NO  -> "label": "LEAN_NO"
-        - Unquoted YES/NO variants
-        """
+        #hopefully this helps fix output not respecting json format
         if not js:
             return js
 
-        # Quote label values if they look like bare tokens
         def repl_label(m: re.Match) -> str:
             token = m.group(1)
             if token in cls.LABELS:
                 return f'"label":"{token}"'
             return m.group(0)
 
-        js = re.sub(r'"label"\s*:\s*([A-Z_]+)', repl_label, js)
+        def repl_grade(m: re.Match) -> str:
+            token = m.group(1)
+            if token in cls.EVIDENCE_GRADES:
+                return f'"evidence_grade":"{token}"'
+            return m.group(0)
 
-        # Sometimes confidence gets quoted; that's valid JSON but you want float later
+        js = re.sub(r'"label"\s*:\s*([A-Z_]+)', repl_label, js)
+        js = re.sub(r'"evidence_grade"\s*:\s*([A-Z])', repl_grade, js)
         return js
 
     @classmethod
@@ -197,62 +221,101 @@ class LLMClient:
 
     @classmethod
     def _salvage_fields(cls, raw_text: str) -> Dict[str, Any]:
-        """
-        As a fallback when strict JSON parsing fails, try to extract:
-        label, confidence, rationale
-        """
         s = raw_text or ""
-        # label
+
         m_label = re.search(r'"label"\s*:\s*"?([A-Z_]+)"?', s)
         label = m_label.group(1) if m_label and m_label.group(1) in cls.LABELS else None
 
-        # confidence
-        m_conf = re.search(r'"confidence"\s*:\s*"?([0-9]*\.?[0-9]+)"?', s)
-        conf = None
-        if m_conf:
-            try:
-                conf = float(m_conf.group(1))
-            except Exception:
-                conf = None
+        m_grade = re.search(r'"evidence_grade"\s*:\s*"?([A-Z])"?', s)
+        evidence_grade = (
+            m_grade.group(1) if m_grade and m_grade.group(1) in cls.EVIDENCE_GRADES else None
+        )
 
-        # rationale (capture JSON string value if present)
         m_rat = re.search(r'"rationale"\s*:\s*"(.*?)"\s*(?:,|\n|\})', s, flags=re.DOTALL)
         rationale = None
         if m_rat:
             rationale = m_rat.group(1).replace('\\"', '"').strip()
 
-        return {
-            "label": label,
-            "confidence": conf,
-            "rationale": rationale,
-            "salvaged": True,
-        }
+        return {"label": label, "evidence_grade": evidence_grade, "rationale": rationale, "salvaged": True}
 
     def _stop_list(self) -> list[str]:
-        # User-configured stops + a couple of safe defaults to prevent post-JSON chatter
         raw = self.cfg.stop_csv or ""
         stops = [x.strip() for x in raw.split(",") if x.strip()]
-        # Add common offenders (don’t duplicate)
         for s in ["\nRationale:", "\n\nRationale:", "```"]:
             if s not in stops:
                 stops.append(s)
         return stops
 
-    async def infer_json(self, session: aiohttp.ClientSession, prompt_text: str) -> Dict[str, Any]:
-        url = self.cfg.base_url.rstrip("/") + self.cfg.generate_path
+    
+    def _endpoint_mode(self) -> str:
+        path = (self.cfg.generate_path or "").strip()
+        if path.endswith("/api/chat"):
+            return "chat"
+        if path.endswith("/api/generate"):
+            return "generate"
+        return "chat"
+
+    def _build_request(self, prompt_text: str) -> Tuple[str, Dict[str, Any], str]:
+        url = self.cfg.base_url.rstrip("/") + (self.cfg.generate_path or "/api/chat")
+        mode = self._endpoint_mode()
+
+        options: Dict[str, Any] = {
+            "temperature": float(self.cfg.temperature),
+            "top_p": float(self.cfg.top_p),
+            "num_predict": int(self.cfg.num_predict),
+            "stop": self._stop_list(),
+        }
+        if self.cfg.seed is not None:
+            options["seed"] = int(self.cfg.seed)
+
+        if mode == "chat":
+            payload = {
+                "model": self.cfg.model,
+                "stream": False,
+                "format": self._output_schema(),
+                "messages": [{"role": "user", "content": prompt_text}],
+                "options": options,
+            }
+            return url, payload, mode
 
         payload = {
             "model": self.cfg.model,
             "prompt": prompt_text,
             "stream": False,
-            # If supported by your Ollama build, this strongly nudges “JSON only”.
-            "format": "json",
-            "options": {
-                "temperature": self.cfg.temperature,
-                "num_predict": self.cfg.num_predict,
-                "stop": self._stop_list(),
-            },
+            "format": self._output_schema(),
+            "options": options,
         }
+        return url, payload, mode
+
+    def _extract_text_and_meta(self, raw_body: str, mode: str) -> Tuple[str, Dict[str, Any]]:
+        meta: Dict[str, Any] = {}
+        raw_text = raw_body.strip()
+
+        try:
+            data = json.loads(raw_body) if raw_body else {}
+        except json.JSONDecodeError:
+            data = {}
+
+        if isinstance(data, dict):
+            meta = {
+                "done": data.get("done"),
+                "done_reason": data.get("done_reason"),
+                "eval_count": data.get("eval_count"),
+                "prompt_eval_count": data.get("prompt_eval_count"),
+                "total_duration": data.get("total_duration"),
+            }
+
+            if mode == "chat":
+                msg = data.get("message") or {}
+                if isinstance(msg, dict):
+                    raw_text = (msg.get("content") or "").strip() or raw_text
+            else:
+                raw_text = (data.get("response") or "").strip() or raw_text
+
+        return raw_text, meta
+
+    async def infer_json(self, session: aiohttp.ClientSession, prompt_text: str) -> Dict[str, Any]:
+        url, payload, mode = self._build_request(prompt_text)
 
         last_err: Optional[Exception] = None
         timeout = aiohttp.ClientTimeout(total=self.cfg.timeout_s)
@@ -289,31 +352,17 @@ class LLMClient:
                             delay = max(delay, 20.0)
 
                         last_err = RuntimeError(f"Ollama HTTP {resp.status}: {raw_body[:800]}")
-                        print(f"[llm] retry attempt={attempt}/{self.cfg.max_retries} status={resp.status} delay={delay:.1f}s")
+                        print(
+                            f"[llm] retry attempt={attempt}/{self.cfg.max_retries} "
+                            f"status={resp.status} delay={delay:.1f}s"
+                        )
                         await asyncio.sleep(delay)
                         continue
 
                     if resp.status >= 400:
                         raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_body[:800]}")
 
-                    # Ollama returns JSON with a "response" field (string)
-                    try:
-                        data = json.loads(raw_body) if raw_body else {}
-                    except json.JSONDecodeError:
-                        data = {}
-
-                    if isinstance(data, dict):
-                        raw_text = (data.get("response") or "").strip() or raw_body.strip()
-                        meta = {
-                            "done": data.get("done"),
-                            "done_reason": data.get("done_reason"),
-                            "eval_count": data.get("eval_count"),
-                            "prompt_eval_count": data.get("prompt_eval_count"),
-                            "total_duration": data.get("total_duration"),
-                        }
-                    else:
-                        raw_text = raw_body.strip()
-                        meta = {}
+                    raw_text, meta = self._extract_text_and_meta(raw_body, mode)
 
                     parsed = self._try_parse_json(raw_text)
                     if parsed is not None:
@@ -332,7 +381,10 @@ class LLMClient:
                 base = min(2 ** (attempt - 1), 60)
                 jitter = random.uniform(0, base * 0.3)
                 delay = base + jitter
-                print(f"[llm] retry attempt={attempt}/{self.cfg.max_retries} error={type(e).__name__} delay={delay:.1f}s")
+                print(
+                    f"[llm] retry attempt={attempt}/{self.cfg.max_retries} "
+                    f"error={type(e).__name__} delay={delay:.1f}s"
+                )
                 await asyncio.sleep(delay)
 
             except Exception as e:
@@ -340,7 +392,10 @@ class LLMClient:
                 base = min(2 ** (attempt - 1), 60)
                 jitter = random.uniform(0, base * 0.3)
                 delay = base + jitter
-                print(f"[llm] retry attempt={attempt}/{self.cfg.max_retries} error={type(e).__name__} delay={delay:.1f}s")
+                print(
+                    f"[llm] retry attempt={attempt}/{self.cfg.max_retries} "
+                    f"error={type(e).__name__} delay={delay:.1f}s"
+                )
                 await asyncio.sleep(delay)
 
         raise RuntimeError(f"LLM request failed after retries: {last_err}")

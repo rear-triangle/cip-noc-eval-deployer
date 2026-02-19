@@ -1,0 +1,122 @@
+TASK
+Evaluate whether a Canadian education program (CIP) is a realistic ENTRY PATHWAY into a Canadian occupation (NOC).
+
+ENTRY PATHWAY = the CIP prepares someone to qualify for or reasonably pursue entry into the occupation described by the NOC with normal post-graduation steps (e.g., licensing, residency, apprenticeship, or certification that the CIP is intended to lead into).
+
+The goal is not skill similarity — it is career pathway alignment.
+
+OUTPUT LABELS
+Return exactly ONE label:
+
+YES     → the CIP is an intended or typical pathway into the occupation
+UNSURE  → the provided text is insufficient or ambiguous to decide
+NO      → the CIP prepares for a different profession (not a real pathway)
+
+You must not invent new labels.
+
+---
+
+PRIMARY DECISION RULE (most important)
+Base your decision mainly on NOC employment_requirements.
+
+If the CIP does not logically lead into the requirements described there, the answer is NO.
+
+main_duties are supporting evidence, not the primary determinant.
+
+---
+
+HARD RULES
+
+1) Credential-gated occupations
+If employment_requirements mention licensing, certification, registration, regulated profession, board exam, or apprenticeship:
+
+- The CIP must clearly represent preparation for that profession/pathway based on the provided CIP text.
+- If not → NO
+
+Do not assume a degree implies a licence unless the CIP text indicates it.
+
+---
+
+2) Domain mismatch
+If the professions belong to clearly different domains (examples):
+- policing vs carpentry
+- business vs healthcare practitioner
+- engineering vs artist
+- telecommunications vs financial advising
+- medical residency vs mechanical trade
+
+→ NO even if some skills overlap.
+
+Generic transferable skills NEVER justify YES.
+
+---
+
+3) Adjacent fields
+If the CIP is in a related academic/professional field and could reasonably lead someone toward that occupation with typical next steps → YES.
+
+Examples:
+engineering → engineer occupation
+nursing → nursing occupation
+accounting → accounting occupation
+law → lawyer
+
+If unclear → UNSURE.
+
+---
+
+CONFIDENCE (0.00–1.00)
+
+Confidence represents how certain you are that your chosen label is correct.
+
+It is NOT tied to the label category and must not be chosen to fit a range.
+
+Interpretation:
+0.95 → almost certainly correct
+0.80 → very likely correct
+0.60 → probably correct but notable uncertainty
+0.50 → genuinely uncertain
+0.30 → probably incorrect
+0.10 → almost certainly incorrect
+
+Choose any value that reflects the strength of evidence in the provided text.
+Two similar cases should rarely have identical confidence values.
+
+---
+
+RATIONALE REQUIREMENTS
+1–2 short sentences.
+Must reference:
+• one concrete CIP detail AND
+• one NOC employment requirement or duty
+
+Do not justify using generic skills.
+
+---
+
+OUTPUT FORMAT
+Return ONLY JSON with keys:
+label, confidence, rationale, model_version, prompt_version
+
+model_version: short string
+prompt_version: "{{prompt_version}}"
+
+---
+
+INPUT
+
+CIP
+code={{cip_code}}
+level={{cip_level}}
+title={{cip_title}}
+definition={{cip_definition}}
+exclusions={{cip_exclusions}}
+examples={{cip_examples}}
+
+NOC
+code={{noc_code}}
+level={{noc_level}}
+title={{noc_title}}
+definition={{noc_definition}}
+main_duties={{noc_main_duties}}
+employment_requirements={{noc_employment_requirements}}
+exclusions={{noc_exclusions}}
